@@ -1,9 +1,9 @@
-import gtk3, glib, gobject
+import oldgtk3/[gtk, glib, gobject]
 import gtk3genui
 
 proc destroy(widget: Widget, data: Gpointer) {.cdecl.} = mainQuit()
 
-gtk3.initWithArgv()
+gtk.initWithArgv()
 
 genui:
   Window{( @r.title = "Radio Buttons"; @r.borderWidth = 10; @r.showAll() )} -> ("destroy": example.destroy):
@@ -13,5 +13,5 @@ genui:
       RadioButton(r4, "RadioButton _3")[false, true, 0]
       Button("Hello world")
 
-gtk3.main()
+gtk.main()
 
