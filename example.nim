@@ -1,4 +1,4 @@
-import oldgtk3/gtk, oldgtk3/glib, oldgtk3/gobject
+import oldgtk3/[gtk, glib, gobject]
 import gtk3genui
 
 proc destroy(widget: Widget, data: Gpointer) {.cdecl.} = mainQuit()
