@@ -1,4 +1,4 @@
-import macros, deques
+import macros, private/stack
 from strutils import strip, split
 
 proc `[]`(s: NimNode, x: Slice[int]): seq[NimNode] =
@@ -6,7 +6,10 @@ proc `[]`(s: NimNode, x: Slice[int]): seq[NimNode] =
   var a = x.a
   var L = x.b - a + 1
   newSeq(result, L)
-  for i in 0.. <L: result[i] = s[i + a]
+  for i in 0 ..< L: result[i] = s[i + a]
+
+proc `[]`(s: NimNode, x: HSlice[int, BackwardsIndex]): seq[NimNode] =
+  s[x.a .. s.len-x.b.int]
 
 proc high(s: NimNode):int =
   ## high operation for NimNodes
@@ -34,27 +37,27 @@ proc parseChildren(p: ParsedWidget, stmtlist:NimNode): seq[ParsedWidget] =
 proc parseNode(node: NimNode): ParsedWidget =
   new result
   var
-    toParse = initDeque[tuple[pointed: bool, node: NimNode]]()
+    toParse = newStack[tuple[pointed: bool, node: NimNode]]()
     cnode = node
     pointed = false
   if cnode.kind == nnkIdent:
-    result.name = $cnode.ident
+    result.name = $cnode
     cnode = nil
   template checkName() =
     if cnode[0].kind == nnkIdent:
-      result.name = $cnode[0].ident
+      result.name = $cnode[0]
     else:
-      toParse.addFirst((pointed: pointed, node: cnode[0]))
+      toParse.push((pointed: pointed, node: cnode[0]))
   while cnode != nil:
     if cnode.len != 0 and cnode[cnode.high].kind == nnkStmtList:
-      toParse.addFirst((pointed: false, node: cnode[cnode.high]))
+      toParse.push((pointed: false, node: cnode[cnode.high]))
       cnode.del cnode.high
     case cnode.kind:
     of nnkInfix:
-      if cnode[0].ident != !"->":
-        error("Unrecognized format near: \"" & $cnode[0].ident & "\"", cnode[0])
-      toParse.addFirst((pointed: true, node: cnode[2]))
-      toParse.addFirst((pointed: false, node: cnode[1]))
+      if $cnode[0] != "->":
+        error("Unrecognized format near: \"" & $cnode[0] & "\"", cnode[0])
+      toParse.push((pointed: true, node: cnode[2]))
+      toParse.push((pointed: false, node: cnode[1]))
     of nnkCurlyExpr:
       result.pureCode = cnode[1]
       checkName()
@@ -75,23 +78,22 @@ proc parseNode(node: NimNode): ParsedWidget =
       checkName()
     of nnkCommand:
       if cnode[cnode.high].kind == nnkIdent:
-        result.name = $cnode[cnode.high].ident
+        result.name = $cnode[cnode.high]
         for i in countdown(cnode.high-1, 0):
-          toParse.addFirst((pointed: pointed, node: cnode[i]))
+          toParse.push((pointed: pointed, node: cnode[i]))
       else:
         for i in countdown(cnode.high, 0):
-          toParse.addFirst((pointed: pointed, node: cnode[i]))
+          toParse.push((pointed: pointed, node: cnode[i]))
     of nnkStmtList:
       result.children = result.parseChildren cnode
     else:
       warning("Found unknown node, this could be an error")
       for child in countdown(cnode.high, 0):
-        toParse.addFirst((pointed: pointed, node: cnode[child]))
+        toParse.push((pointed: pointed, node: cnode[child]))
     if toParse.len != 0:
-      var step = toParse.peekFirst()
+      var step = toParse.pop()
       cnode = step.node
       pointed = step.pointed
-      discard toParse.popFirst()
     else:
       cnode = nil
 
@@ -112,7 +114,7 @@ proc createWidget(widget: ParsedWidget, parent: NimNode = nil): NimNode =
     for i in 0 .. n.high:
       let child = n[i]
       if child.kind == nnkPrefix and child[0].kind == nnkIdent and child[1].kind == nnkIdent and
-        child[0].ident == !"@" and (child[1].ident == !"result" or child[1].ident == !"r"):
+        child[0].eqIdent("@") and (child[1].eqIdent("result") or child[1].eqIdent("r")):
           n[i] = widget.generatedSym
           return
       child.replacePlaceholder()
@@ -129,13 +131,12 @@ proc createWidget(widget: ParsedWidget, parent: NimNode = nil): NimNode =
         widget.pureCode.repr.split("\n")
     widget.pureCode = newStmtList()
     for line in l:
-      echo line.strip()
       widget.pureCode.add line.strip().parseStmt
     replacePlaceholder(widget.pureCode)
     result.add(widget.pureCode)
 
   if parent != nil:
-    if widget.packArgs == nil:
+    if widget.packArgs.len == 0:
       result.add newCall("add", parent, widget.generatedSym)
     else:
       var packCall = newCall("pack_start", parent, widget.generatedSym)
@@ -143,23 +144,22 @@ proc createWidget(widget: ParsedWidget, parent: NimNode = nil): NimNode =
         packCall.add packArg
       result.add packCall
 
-  if widget.eventBindings != nil:
-    for binding in widget.eventBindings:
-      result.add nnkDiscardStmt.newTree(
-        newCall(
-          "gsignal_connect",
-          widget.generatedSym,
-          binding[0],
-          nnkCast.newTree(
-            newIdentNode("GCallback"),
-            binding[1]
-          ),
-          newNilLit()
-        )
+  for binding in widget.eventBindings:
+    result.add nnkDiscardStmt.newTree(
+      newCall(
+        "gsignal_connect",
+        widget.generatedSym,
+        binding[0],
+        nnkCast.newTree(
+          newIdentNode("GCallback"),
+          binding[1]
+        ),
+        newNilLit()
       )
+    )
 
 macro genui*(widgetCode: untyped): untyped =
-  ## Macro to create Gtk2 code from the genui syntax (see documentation)
+  ## Macro to create Gtk3 code from the genui syntax (see documentation)
   let parsed = nil.parseChildren(widgetCode)
   result = newStmtList()
   for widget in parsed:
@@ -168,7 +168,7 @@ macro genui*(widgetCode: untyped): untyped =
     hint(lineinfo(widgetCode) & " GenUI macro generated this Gtk code:" & result.repr)
 
 macro addElements*(parent:untyped, widgetCode: untyped): untyped=
-  ## Macro to create Gtk2 code from the genui syntax (see documentation) and create add calls for the resulting widgets for the given parent
+  ## Macro to create Gtk3 code from the genui syntax (see documentation) and create add calls for the resulting widgets for the given parent
   let parsed = nil.parseChildren(widgetCode)
   result = newStmtList()
   for widget in parsed:
