@@ -1,7 +1,10 @@
 import oldgtk3/[gtk, glib, gobject]
-import gtk3genui
+import gtk3genui/gtk3genui
 
 proc destroy(widget: Widget, data: Gpointer) {.cdecl.} = mainQuit()
+
+proc clicked(widget: Widget, data: Gpointer) {.cdecl.} =
+  echo "Button clicked"
 
 gtk.initWithArgv()
 
@@ -11,7 +14,7 @@ genui:
       RadioButton("RadioButton _1")[expand = false, fill = true, padding = 0] { var r4 = @r }
       RadioButton(r4, "RadioButton _2")[false, true, 0]
       RadioButton(r4, "RadioButton _3")[false, true, 0]
-      Button("Hello world")
+      Button("Hello world") -> ("clicked": example.clicked)
 
 gtk.main()
 
